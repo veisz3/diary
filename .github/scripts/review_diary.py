@@ -9,7 +9,7 @@ import re
 
 # 環境変数から情報を取得
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 REPO_NAME = os.environ.get("GITHUB_REPOSITORY")  # GitHub Actionsで自動的に設定される
 
@@ -46,8 +46,8 @@ def get_new_entries():
         print(f"エラー: {e}")
         return []
 
-def review_with_gemini(entry_content):
-    """Gemini APIを使用して日記エントリをレビューする"""
+def review_with_claude(entry_content):
+    """Claude APIを使用して日記エントリをレビューする"""
     try:
         # 不要なマークダウン記法を取り除いて、純粋な内容部分を抽出
         content_section = re.search(r'## 内容\n([\s\S]*?)(?=\n##|\Z)', entry_content)
@@ -56,39 +56,42 @@ def review_with_gemini(entry_content):
         else:
             diary_text = entry_content
         
-        # APIエンドポイント
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+        # Claude API エンドポイント
+        url = "https://api.anthropic.com/v1/messages"
+        
+        # リクエストヘッダー
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": CLAUDE_API_KEY,
+            "anthropic-version": "2023-06-01"
+        }
         
         # リクエストボディ
         payload = {
-            "contents": [{
-                "parts": [{
-                    "text": f"""以下は日記の内容です。この日記に対して、以下の観点からポジティブなレビューとアドバイスを短く（100〜200文字程度）提供してください：
+            "model": "claude-3-opus-20240229",
+            "max_tokens": 500,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": f"""以下は日記の内容です。この日記に対して、以下の観点からポジティブなレビューとアドバイスを短く（100〜200文字程度）提供してください：
 
 1. 良かった点を1つ挙げる
 2. もっと詳しく知りたい点を1つ挙げる
 3. 文章の流れについてのアドバイス
 
 日記の内容：
-{diary_text}
-
-レビュー："""
-                }]
-            }],
-            "generationConfig": {
-                "temperature": 0.7,
-                "topK": 40,
-                "topP": 0.95,
-                "maxOutputTokens": 500
-            }
+{diary_text}"""
+                }
+            ]
         }
         
         # APIリクエスト
-        response = requests.post(url, json=payload)
+        response = requests.post(url, headers=headers, json=payload)
         
         if response.status_code == 200:
             result = response.json()
-            review_text = result["candidates"][0]["content"]["parts"][0]["text"]
+            # Claude APIはcontent配列を返すため、テキスト部分を抽出
+            review_text = result["content"][0]["text"]
             return review_text
         else:
             print(f"APIエラー ({response.status_code}): {response.text}")
@@ -117,7 +120,7 @@ def send_to_discord(entry, review):
                         "inline": True
                     },
                     {
-                        "name": "🤖 AIレビュー",
+                        "name": "🤖 Claude AIのレビュー",
                         "value": review,
                         "inline": False
                     }
@@ -163,7 +166,7 @@ def main():
     # 各エントリをレビュー
     for entry in new_entries:
         print(f"レビュー中: {entry['path']}")
-        review = review_with_gemini(entry["content"])
+        review = review_with_claude(entry["content"])
         
         # Discordに送信
         send_to_discord(entry, review)
