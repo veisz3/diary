@@ -12,7 +12,7 @@ import sys
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-REPO_NAME = os.environ.get("GITHUB_REPOSITORY")  # GitHub Actionsで自動的に設定される
+REPO_NAME = 'veisz3/diary-repo'
 
 # 環境変数チェック
 missing_vars = []
