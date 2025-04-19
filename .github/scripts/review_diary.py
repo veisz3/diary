@@ -6,16 +6,43 @@ import requests
 from datetime import datetime, timedelta
 from github import Github
 import re
+import sys
 
 # 環境変数から情報を取得
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-REPO_NAME = os.environ.get("GITHUB_REPOSITORY")  # GitHub Actionsで自動的に設定される
+# REPO_NAME = os.environ.get("GITHUB_REPOSITORY")  # GitHub Actionsで自動的に設定される
+REPO_NAME = 'veisz3/diary-repo'
+
+# 環境変数チェック
+missing_vars = []
+if not GITHUB_TOKEN:
+    missing_vars.append("GITHUB_TOKEN")
+if not CLAUDE_API_KEY:
+    missing_vars.append("CLAUDE_API_KEY")
+if not DISCORD_WEBHOOK_URL:
+    missing_vars.append("DISCORD_WEBHOOK_URL")
+if not REPO_NAME:
+    missing_vars.append("GITHUB_REPOSITORY")
+
+if missing_vars:
+    print(f"エラー: 以下の環境変数が設定されていません: {', '.join(missing_vars)}")
+    sys.exit(1)
+
+# Webhook URL の形式を確認
+if not DISCORD_WEBHOOK_URL.startswith(('http://', 'https://')):
+    print(f"エラー: DISCORD_WEBHOOK_URL の形式が正しくありません: {DISCORD_WEBHOOK_URL}")
+    sys.exit(1)
 
 # GitHubクライアントの初期化
-g = Github(GITHUB_TOKEN)
-repo = g.get_repo(REPO_NAME)
+try:
+    g = Github(GITHUB_TOKEN)
+    repo = g.get_repo(REPO_NAME)
+    print(f"リポジトリの情報: {repo.full_name}")
+except Exception as e:
+    print(f"GitHubリポジトリへの接続エラー: {e}")
+    sys.exit(1)
 
 # 日付の設定
 today = datetime.now()
@@ -29,21 +56,30 @@ def get_new_entries():
     try:
         # 昨日のフォルダをチェック
         diary_folder = f"diary/{yesterday_str}"
-        contents = repo.get_contents(diary_folder)
+        print(f"フォルダをチェック中: {diary_folder}")
         
-        # .mdファイルのみを取得
-        for content in contents:
-            if content.path.endswith('.md'):
-                # ファイルの内容を取得
-                file_content = content.decoded_content.decode('utf-8')
-                new_entries.append({
-                    "path": content.path,
-                    "content": file_content
-                })
+        try:
+            contents = repo.get_contents(diary_folder)
+            
+            # .mdファイルのみを取得
+            for content in contents:
+                if content.path.endswith('.md'):
+                    # ファイルの内容を取得
+                    file_content = content.decoded_content.decode('utf-8')
+                    new_entries.append({
+                        "path": content.path,
+                        "content": file_content
+                    })
+            
+            print(f"{len(new_entries)}件のマークダウンファイルを見つけました")
+        except Exception as e:
+            print(f"フォルダが見つからないか内容の取得に失敗しました: {e}")
+            # フォルダが見つからなくても正常終了させる
+            return []
         
         return new_entries
     except Exception as e:
-        print(f"エラー: {e}")
+        print(f"エントリ取得エラー: {e}")
         return []
 
 def review_with_claude(entry_content):
@@ -85,6 +121,8 @@ def review_with_claude(entry_content):
             ]
         }
         
+        print("Claude APIにリクエスト送信中...")
+        
         # APIリクエスト
         response = requests.post(url, headers=headers, json=payload)
         
@@ -94,7 +132,7 @@ def review_with_claude(entry_content):
             review_text = result["content"][0]["text"]
             return review_text
         else:
-            print(f"APIエラー ({response.status_code}): {response.text}")
+            print(f"Claude APIエラー ({response.status_code}): {response.text}")
             return "レビューの取得中にエラーが発生しました。"
     except Exception as e:
         print(f"レビュー中のエラー: {e}")
@@ -128,6 +166,8 @@ def send_to_discord(entry, review):
             }]
         }
         
+        print(f"Discordに通知を送信中: {DISCORD_WEBHOOK_URL[:30]}...")
+        
         # Discordウェブフックに送信
         response = requests.post(
             DISCORD_WEBHOOK_URL,
@@ -136,6 +176,32 @@ def send_to_discord(entry, review):
         
         if response.status_code == 204:
             print(f"Discord通知成功: {entry['path']}")
+            return True
+        else:
+            print(f"Discord通知エラー ({response.status_code}): {response.text}")
+            return False
+    except Exception as e:
+        print(f"Discord送信エラー: {e}")
+        return False
+
+def send_empty_notification():
+    """エントリがない場合のDiscord通知"""
+    try:
+        # エントリがない場合のメッセージ
+        empty_message = {
+            "content": f"📅 {yesterday_str}の日記エントリはありませんでした。今日はどんな一日でしたか？"
+        }
+        
+        print(f"エントリなしの通知を送信中: {DISCORD_WEBHOOK_URL[:30]}...")
+        
+        # Discordウェブフックに送信
+        response = requests.post(
+            DISCORD_WEBHOOK_URL,
+            json=empty_message
+        )
+        
+        if response.status_code == 204:
+            print("Discord通知成功: エントリなし")
             return True
         else:
             print(f"Discord通知エラー ({response.status_code}): {response.text}")
@@ -155,10 +221,7 @@ def main():
         print(f"新しい日記エントリは見つかりませんでした")
         
         # エントリがない場合もDiscordに通知
-        empty_message = {
-            "content": f"📅 {yesterday_str}の日記エントリはありませんでした。今日はどんな一日でしたか？"
-        }
-        requests.post(DISCORD_WEBHOOK_URL, json=empty_message)
+        send_empty_notification()
         return
     
     print(f"{len(new_entries)}件の新しい日記エントリを見つけました")
@@ -174,4 +237,8 @@ def main():
     print("== 処理完了 ==")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"予期せぬエラーが発生しました: {e}")
+        sys.exit(1)
