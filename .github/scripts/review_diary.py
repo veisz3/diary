@@ -53,62 +53,40 @@ def get_new_entries():
     new_entries = []
     
     try:
-        # 昨日のフォルダをチェック
-        diary_folder = f"diary/{yesterday_str}"
-        print(f"フォルダをチェック中: {diary_folder}")
+        # リポジトリ情報を出力
+        print(f"リポジトリ名: {REPO_NAME}")
+        print(f"昨日の日付: {yesterday_str}")
         
+        # リポジトリ内の全ファイルを出力して構造を確認
         try:
-            # まずフォルダの存在を確認
-            contents = repo.get_contents(diary_folder)
-            
-            # .mdファイルのみを取得
-            for content in contents:
-                if content.path.endswith('.md'):
-                    # ファイルの内容を取得
-                    print(f"マークダウンファイル発見: {content.path}")
-                    file_content = content.decoded_content.decode('utf-8')
-                    new_entries.append({
-                        "path": content.path,
-                        "content": file_content
-                    })
-        except Exception as e:
-            print(f"指定パスでのファイル取得に失敗: {e}")
-            
-            # 絶対パスを考慮して別のパターンも試す
-            try:
-                # リポジトリのルートコンテンツを取得
-                root_contents = repo.get_contents("")
-                diary_found = False
+            root_contents = repo.get_contents("")
+            print("リポジトリルートの内容:")
+            for item in root_contents:
+                print(f" - {item.type}: {item.path}")
                 
-                # diaryフォルダを探す
-                for item in root_contents:
-                    if item.type == "dir" and item.name == "diary":
-                        diary_found = True
-                        diary_path = item.path
-                        break
-                
-                if diary_found:
-                    # diaryフォルダ内の日付フォルダを探す
-                    diary_contents = repo.get_contents(diary_path)
-                    for date_folder in diary_contents:
-                        if date_folder.type == "dir" and yesterday_str in date_folder.name:
-                            # 日付フォルダ内のmdファイルを取得
-                            folder_contents = repo.get_contents(date_folder.path)
-                            for content in folder_contents:
-                                if content.path.endswith('.md'):
-                                    print(f"代替パスでファイル発見: {content.path}")
-                                    file_content = content.decoded_content.decode('utf-8')
+                # diaryフォルダを見つけたら中身も確認
+                if item.name == "diary" and item.type == "dir":
+                    diary_contents = repo.get_contents(item.path)
+                    print(f"   diaryフォルダの内容:")
+                    for diary_item in diary_contents:
+                        print(f"    - {diary_item.type}: {diary_item.path}")
+                        
+                        # 昨日の日付フォルダがあればその中身も確認
+                        if yesterday_str in diary_item.path and diary_item.type == "dir":
+                            day_contents = repo.get_contents(diary_item.path)
+                            print(f"     {yesterday_str}フォルダの内容:")
+                            for day_item in day_contents:
+                                print(f"      - {day_item.type}: {day_item.path}")
+                                
+                                # マークダウンファイルを見つけたら追加
+                                if day_item.path.endswith('.md'):
+                                    file_content = day_item.decoded_content.decode('utf-8')
                                     new_entries.append({
-                                        "path": content.path,
+                                        "path": day_item.path,
                                         "content": file_content
                                     })
-            except Exception as nested_e:
-                print(f"代替パスでの検索でも失敗: {nested_e}")
-        
-        if new_entries:
-            print(f"{len(new_entries)}件のマークダウンファイルを見つけました")
-        else:
-            print("マークダウンファイルは見つかりませんでした")
+        except Exception as e:
+            print(f"リポジトリ構造探索エラー: {e}")
         
         return new_entries
     except Exception as e:
