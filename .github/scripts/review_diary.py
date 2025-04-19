@@ -12,8 +12,7 @@ import sys
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-# REPO_NAME = os.environ.get("GITHUB_REPOSITORY")  # GitHub Actionsで自動的に設定される
-REPO_NAME = 'veisz3/diary-repo'
+REPO_NAME = os.environ.get("GITHUB_REPOSITORY")  # GitHub Actionsで自動的に設定される
 
 # 環境変数チェック
 missing_vars = []
@@ -59,23 +58,57 @@ def get_new_entries():
         print(f"フォルダをチェック中: {diary_folder}")
         
         try:
+            # まずフォルダの存在を確認
             contents = repo.get_contents(diary_folder)
             
             # .mdファイルのみを取得
             for content in contents:
                 if content.path.endswith('.md'):
                     # ファイルの内容を取得
+                    print(f"マークダウンファイル発見: {content.path}")
                     file_content = content.decoded_content.decode('utf-8')
                     new_entries.append({
                         "path": content.path,
                         "content": file_content
                     })
-            
-            print(f"{len(new_entries)}件のマークダウンファイルを見つけました")
         except Exception as e:
-            print(f"フォルダが見つからないか内容の取得に失敗しました: {e}")
-            # フォルダが見つからなくても正常終了させる
-            return []
+            print(f"指定パスでのファイル取得に失敗: {e}")
+            
+            # 絶対パスを考慮して別のパターンも試す
+            try:
+                # リポジトリのルートコンテンツを取得
+                root_contents = repo.get_contents("")
+                diary_found = False
+                
+                # diaryフォルダを探す
+                for item in root_contents:
+                    if item.type == "dir" and item.name == "diary":
+                        diary_found = True
+                        diary_path = item.path
+                        break
+                
+                if diary_found:
+                    # diaryフォルダ内の日付フォルダを探す
+                    diary_contents = repo.get_contents(diary_path)
+                    for date_folder in diary_contents:
+                        if date_folder.type == "dir" and yesterday_str in date_folder.name:
+                            # 日付フォルダ内のmdファイルを取得
+                            folder_contents = repo.get_contents(date_folder.path)
+                            for content in folder_contents:
+                                if content.path.endswith('.md'):
+                                    print(f"代替パスでファイル発見: {content.path}")
+                                    file_content = content.decoded_content.decode('utf-8')
+                                    new_entries.append({
+                                        "path": content.path,
+                                        "content": file_content
+                                    })
+            except Exception as nested_e:
+                print(f"代替パスでの検索でも失敗: {nested_e}")
+        
+        if new_entries:
+            print(f"{len(new_entries)}件のマークダウンファイルを見つけました")
+        else:
+            print("マークダウンファイルは見つかりませんでした")
         
         return new_entries
     except Exception as e:
